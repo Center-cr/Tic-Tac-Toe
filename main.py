@@ -1,0 +1,558 @@
+import pygame
+import ctypes
+# 导入socket 库
+from socket import *
+import threading
+import time
+import re
+global pi_reg,pi_sure_flag,pi_row,pi_col,pi_flash,message,sure_flag,flash_flag,SOR, board,over_pos,regret_flag
+
+pi_sure_flag=re.compile(r'sure_f(\d)')
+pi_row=re.compile(r'row(\d)')
+pi_col=re.compile(r'col(\d)')
+pi_flash=re.compile(r'flash(\d)')##刷新参数
+pi_reg = re.compile(r'reg(\d)')
+message= "sure_f0 row0 col0 flash0 SenOrRec0 reg0"
+sure_flag = 0
+flash_flag = 0
+regret_flag = 0
+over_pos= []
+send_row = 0
+send_col = 0
+SOR = 0 #0是发送
+# 主机地址为空字符串，表示绑定本机所有网络接口ip地址
+# 等待客户端来连接
+IP = '192.168.2.95'
+# 端口号
+PORT = 50000
+# 定义一次从socket缓冲区最多读入512个字节数据
+BUFLEN = 512
+
+# 实例化一个socket对象
+# 参数 AF_INET 表示该socket网络层使用IP协议
+# 参数 SOCK_STREAM 表示该socket传输层使用TCP协议
+listenSocket = socket(AF_INET, SOCK_STREAM)
+
+# socket绑定地址和端口
+listenSocket.bind((IP, PORT))
+
+
+# 使socket处于监听状态，等待客户端的连接请求
+# 参数 8 表示 最多接受多少个等待连接的客户端
+listenSocket.listen(8)
+print(f'服务端启动成功，在{PORT}端口等待客户端连接...')
+
+dataSocket, addr = listenSocket.accept()
+print('接受一个客户端连接:', addr)
+
+
+global Send_Flag,Receive_Flag,Current_Player,If_over,previewImg,gameMode,Ini_FLag,Reset_Flag
+# 初始化 pygame
+pygame.init()
+
+# 定义颜色
+blue = (78, 140, 243)
+light_blue = (100, 100, 255)
+red = (242, 89, 97)
+light_red = (255, 100, 100)
+dark_grey = (85, 85, 85)
+light_grey = (100, 100, 100)
+background_color = (225, 225, 225)
+Send_Flag = 0
+Receive_Flag = 0##一开始不发送也不接受，主机
+Current_Player = 'X'#X先下棋
+If_over = 0
+gameMode = 0
+Ini_FLag = 1
+# 创建窗口
+screen = pygame.display.set_mode((600, 800))
+pygame.display.set_caption('井字棋')
+
+# 游戏图片
+crossImg = pygame.image.load('Images/crossImg.png')
+crossImg_rect = crossImg.get_rect()
+crossImg_rect.center = (200, 300)
+circleImg = pygame.image.load('Images/circleImg.png')
+circleImg_rect = crossImg.get_rect()
+circleImg_rect.center = (400, 300)
+previewCrossImg = pygame.image.load('Images/prev_crossImg.png')
+previewCircleImg = pygame.image.load('Images/prev_circleImg.png')
+
+previewImg = previewCrossImg
+# 按钮图片
+restartImg = pygame.image.load('Images/restart.png')
+restartHoveredImg = pygame.image.load('Images/restart_hovered.png')
+ReGretImg = pygame.image.load('Images/button4Img.png')
+# 定义棋盘
+board = [['', '', ''],
+         ['', '', ''],
+         ['', '', '']]
+
+# 定义计分板
+score = {'X': 0, 'O': 0}
+font = pygame.font.Font('freesansbold.ttf', 32)
+X_score = pygame.image.load('Images/X_scoreImg.png')
+O_score = pygame.image.load('Images/O_scoreImg.png')
+
+# 菜单图片
+buttom1 = pygame.image.load('Images/button1Img.png')
+buttom1_rect = buttom1.get_rect()
+buttom1_rect.center = (300, 312)
+buttom2 = pygame.image.load('Images/button2Img.png')
+buttom2_rect = buttom2.get_rect()
+buttom2_rect.center = (300, 472)
+
+buttom3 = pygame.image.load('Images/button3Img.png')
+buttom3_rect = buttom3.get_rect()
+buttom3_rect.center = (300, 632)
+
+buttom4_rect = ReGretImg.get_rect()
+buttom4_rect.center = (478, 751)
+
+logo = pygame.image.load('Images/logo.png')
+
+# 选择菜单图片
+chooseImg = pygame.image.load('Images/choose.png')
+
+
+def menu():
+    global gameMode
+    running = True
+    while running:
+        screen.fill(background_color)
+        mx, my = pygame.mouse.get_pos()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if buttom1_rect.collidepoint((mx, my)):
+                    game(0, 'X')
+                    gameMode = 0
+                elif buttom2_rect.collidepoint((mx, my)):
+                    player = choose()
+                    if player is not None:
+                        game(1, player)
+                        gameMode =1
+                elif buttom3_rect.collidepoint((mx, my)):
+                    gameMode = 2
+                    game(2, 'X')
+        screen.blit(logo, (8, 25))
+        screen.blit(buttom1, (100, 250))
+        screen.blit(buttom2, (100, 410))
+        screen.blit(buttom3, (100, 570))
+        pygame.display.update()
+
+
+def game(gameMode, player):
+    global send_row, send_col ,Send_Flag,row, col,Receive_Flag,Current_Player,If_over,previewImg,message,sure_flag,flash_flag,board,regret_flag
+    my = player
+    player = 'X'
+    running = True
+    while running:
+        mouse = pygame.mouse.get_pos()
+        row, col = int(mouse[0] / 200), int(mouse[1] / 200)
+        for event in pygame.event.get():
+            if verifyWinner('X'):
+                print("确认X胜利")
+                player = 'X'
+                previewImg = previewCrossImg
+            if verifyWinner('O'):
+                print("确认O胜利")
+                player = 'X'
+                previewImg = previewCrossImg
+            if event.type == pygame.QUIT:
+                resetGame()
+                running = False
+            elif isBoardFull():
+                ctypes.windll.user32.MessageBoxW(0, '平局', '提示', 0)
+                resetBoard()
+            elif gameMode == 1 and player != my:
+                computerMove(player)
+                drawBoard()
+                pygame.display.update()
+                # if verifyWinner(player):
+                #     player = 'X'
+                #     previewImg = previewCrossImg
+                # else:
+                #     player, previewImg = updatePlayer(player)
+                if verifyWinner(player):
+                    player = 'X'
+                    previewImg = previewCrossImg
+                else:
+                    player, previewImg = updatePlayer(player)
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if gameMode != 2:
+                    if row < 3 and col < 3 and board[row][col] == '':
+                        # send_row = row
+                        # send_col = col
+                        playerMove(player, row, col)
+                        drawBoard()
+                        Send_Flag = 1
+                        time.sleep(0.5)
+                        if verifyWinner('X'):
+                            player = 'X'
+                            previewImg = previewCrossImg
+                        else :
+                            player, previewImg = updatePlayer(player)
+                if gameMode == 2:
+                    if row < 3 and col < 3 and board[row][col] == '':
+                        print("Current_Player", Current_Player)
+                    if row < 3 and col < 3 and board[row][col] == '' and Current_Player == 'X':#自己的回合鼠标才能点击
+                        sure_flag = 1
+                        send_row = row
+                        send_col = col
+                        regret_flag = 0
+                        message = "sure_f"+str(sure_flag) + "row" + str(send_row)+" col"+str(send_col) + "flash"+ str(flash_flag)+"reg"+str(regret_flag)
+                        time.sleep(0.3)
+                        playerMove('X', row, col)
+                        drawBoard()
+                        Current_Player = 'O'#下完换对方
+                        previewImg = previewCircleImg
+                        print("I am going to Send message X")
+                        time.sleep(0.5)
+                        print("I am waiting for O message")
+                    # else:
+                    #         Receive_Flag = 1
+                if 550 < mouse[0] < 582 and 610 < mouse[1] < 642:
+                    flash_flag = 1
+                    message = "sure_f" + str(sure_flag) + "row" + str(send_row) + " col" + str(
+                        send_col) + "flash" + str(flash_flag) + "reg" + str(regret_flag)
+                    resetGame()
+                if buttom4_rect.collidepoint((mouse[0], mouse[1])):
+                    if gameMode != 0 :
+                        print("按钮有效")
+                        lenth =len(over_pos)
+                        if lenth > 0:
+                            x = over_pos[lenth - 1][0]
+                            y = over_pos[lenth - 1][1]
+                            del over_pos[lenth-1]
+                            if lenth == 1:
+                                resetGame()
+                            elif board[x][y] == "X":
+                                print("regret x")
+                                Current_Player = "O"
+                                previewImg = previewCircleImg
+                                board[x][y] = " "
+                                drawBoard()
+                            elif board[x][y] == "O":
+                                print("regret o")
+                                Current_Player = "X"
+                                previewImg = previewCrossImg
+                                board[x][y] = " "
+                                drawBoard()
+                            pygame.display.update()
+                        # time.sleep(0.5)
+                    if gameMode == 1:
+                        print("按钮有效")
+                        lenth =len(over_pos)
+                        print("regret,computer1111")
+                        if lenth > 1 and Current_Player == my:
+                            print("regret,computer")
+                            x1 = over_pos[lenth - 1][0]
+                            y1 = over_pos[lenth - 1][1]
+                            x2 = over_pos[lenth - 2][0]
+                            y2 = over_pos[lenth - 2][1]
+                            del over_pos[lenth-1]
+                            del over_pos[lenth-2]
+                            board[x1][y1]= ' '
+                            board[x2][y2]= ' '
+                            drawBoard()
+                            pygame.display.update()
+                        # time.sleep(0.5)
+                    if gameMode == 2 :
+                        print("regret>>>")
+                        regret_flag = 1
+                        message = "sure_f"+str(sure_flag) + "row" + str(send_row)+" col"+str(send_col) + "flash"+ str(flash_flag)+"reg"+str(regret_flag)
+                            # time.sleep(0.5)
+        screen.fill(background_color)
+        drawBoard()
+        drawBottomMenu(mouse)
+        if row < 3 and col < 3:
+            visualizeMove(row, col, previewImg)
+        pygame.display.update()
+
+
+def choose():
+    player = None
+    running = True
+    while running:
+        mouse = pygame.mouse.get_pos()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if crossImg_rect.collidepoint((mouse[0], mouse[1])):
+                    player = 'X'
+                    running = False
+                elif circleImg_rect.collidepoint((mouse[0], mouse[1])):
+                    player = 'O'
+                    running = False
+        screen.blit(crossImg, (80, 300))
+        screen.blit(circleImg, (340, 300))
+        screen.blit(chooseImg, (8, 25))
+        pygame.display.update()
+    return player
+
+
+def drawBoard():
+    # 画棋子
+    for row in range(3):
+        for col in range(3):
+            pos = (row * 200 + 12, col * 200 + 12)
+            if board[row][col] == 'X':
+                screen.blit(crossImg, pos)
+            elif board[row][col] == 'O':
+                screen.blit(circleImg, pos)
+    # 画网格
+    width = 10
+    color = dark_grey
+    pygame.draw.line(screen, color, (200, 0), (200, 600), width)
+    pygame.draw.line(screen, color, (400, 0), (400, 600), width)
+    pygame.draw.line(screen, color, (0, 200), (600, 200), width)
+    pygame.draw.line(screen, color, (0, 400), (600, 400), width)
+    # 画边框
+    pygame.draw.rect(screen, color, (0, 0, 10, 600))
+    pygame.draw.rect(screen, color, (0, 0, 600, 10))
+    pygame.draw.rect(screen, color, (590, 0, 10, 600))
+
+
+def drawBottomMenu(mouse):
+    pygame.draw.rect(screen, dark_grey, (0, 600, 600, 100))
+    pygame.draw.rect(screen, light_grey, (10, 610, 580, 80))
+    screen.blit(restartImg, (550, 610))
+    screen.blit(ReGretImg,(400,720))
+    # Hover animation
+    if 550 < mouse[0] < 582 and 610 < mouse[1] < 642:
+        screen.blit(restartHoveredImg, (548, 608))
+    screen.blit(X_score, (200, 610))
+    screen.blit(O_score, (370, 610))
+    scoreboard = font.render(': %d x %d :' % (score['X'], score['O']), True, background_color, light_grey)
+    screen.blit(scoreboard, (244, 610))
+
+
+def visualizeMove(row, col, previewImg):
+    if board[row][col] == '':
+        screen.blit(previewImg, (row * 200 + 12, col * 200 + 12))
+
+
+def playerMove(player, row, col):
+    board[row][col] = player
+    over_pos.append((row,col))
+def CounterMove(row, col):
+    board[row][col] = "O"
+
+
+def computerMove(player):
+    global over_pos
+    bestScore = float('inf')
+    for row in range(3):
+        for col in range(3):
+            if board[row][col] == '':
+                board[row][col] = 'O'
+                score = minimax(board, 'X')
+                board[row][col] = ''
+                if score < bestScore:
+                    bestScore = score
+                    bestMove = (row, col)
+    board[bestMove[0]][bestMove[1]] = player
+    over_pos.append((bestMove[0],bestMove[1]))
+
+
+scores = {'X': 1, 'O': -1, 'tie': 0}
+
+
+def minimax(board, cur_player):
+    if isWinner('X'):
+        return scores['X']
+    elif isWinner('O'):
+        return scores['O']
+    elif isBoardFull():
+        return scores['tie']
+    if cur_player == 'X':
+        bestScore = float('-inf')
+        nextPlayer = 'O'
+        minORmax = max
+    else:
+        bestScore = float('inf')
+        nextPlayer = 'X'
+        minORmax = min
+    for row in range(3):
+        for col in range(3):
+            if board[row][col] == '':
+                board[row][col] = cur_player
+                score = minimax(board, nextPlayer)
+                board[row][col] = ''
+                bestScore = minORmax(score, bestScore)
+            if bestScore == scores[cur_player]:
+                return bestScore
+    return bestScore
+
+
+def updatePlayer(player):
+    if player == 'X':
+        newPlayer = 'O'
+        previewImg = previewCircleImg
+    else:
+        newPlayer = 'X'
+        previewImg = previewCrossImg
+    return newPlayer, previewImg
+
+
+
+def isWinner(player):
+    return ((board[0][0] == player and board[0][1] == player and board[0][2] == player) or
+            (board[1][0] == player and board[1][1] == player and board[1][2] == player) or
+            (board[2][0] == player and board[2][1] == player and board[2][2] == player) or
+            (board[0][0] == player and board[1][0] == player and board[2][0] == player) or
+            (board[0][1] == player and board[1][1] == player and board[2][1] == player) or
+            (board[0][2] == player and board[1][2] == player and board[2][2] == player) or
+            (board[0][0] == player and board[1][1] == player and board[2][2] == player) or
+            (board[0][2] == player and board[1][1] == player and board[2][0] == player))
+
+
+def verifyWinner(player):
+    global Send_Flag, Receive_Flag, Current_Player,dataSocket,gameMode,previewImg
+    if isWinner(player):
+        # dataSocket.close()
+        # dataSocket, addr = listenSocket.accept()
+        print(player, "win")
+        if gameMode == 2:
+            print("I have turn current_player to X")
+            Current_Player = 'X'  # X先下棋
+            previewImg = previewCrossImg
+            if player == 'O':
+                toSend = 'Over'
+                dataSocket.send(toSend.encode())
+                print("send_meseage:",toSend)
+                Send_Flag = 0
+                Receive_Flag = 0  ##一开始不发送也不接受，主机
+
+        score[player] += 1
+        ctypes.windll.user32.MessageBoxW(0, player + ' 获胜！', '提示', 0)
+        resetBoard()
+        return True
+    return False
+
+
+def isBoardFull():
+    for i in range(3):
+        for j in range(3):
+            if board[i][j] == '':
+                return False
+    return True
+
+
+def resetBoard():
+    for i in range(3):
+        for j in range(3):
+            board[i][j] = ''
+
+def Common_Reset():##对方刷新引起的刷新
+    global Send_Flag,Receive_Flag,gameMode,Current_Player,previewImg,dataSocket,over_pos
+    resetBoard()
+    over_pos = []
+    score['X'] = 0
+    score['O'] = 0
+    previewImg = previewCrossImg
+    Current_Player = 'X'
+
+
+def resetGame():
+    global Send_Flag,Receive_Flag,gameMode,Current_Player,previewImg,dataSocket,over_pos
+    over_pos= []
+    resetBoard()
+    score['X'] = 0
+    score['O'] = 0
+    if gameMode == 2:
+        Current_Player = 'X'
+        print("I have turn the picture to Cross")
+        previewImg = previewCrossImg
+
+
+global i
+i = 0
+
+def handle(rec):
+    global send_row, send_col, Send_Flag, row, col, Receive_Flag, i, Current_Player, previewImg, message,over_pos
+    global pi_sure_flag, pi_row, pi_col, pr_flash,pi_row,pi_reg
+    if rec:
+        print("rec    in re",rec)
+        re_sure_flag = int(pi_sure_flag.search(rec).group(1))
+        re_row = int(pi_row.search(rec).group(1))
+        re_col = int(pi_col.search(rec).group(1))
+        re_flash = int(pi_flash.search(rec).group(1))
+        re_reg = int(pi_reg.search(rec).group(1))
+        if re_sure_flag == 1:
+            counter_row = re_row
+            counter_col = re_col
+            board[counter_row][counter_col] = "O"
+            over_pos.append((counter_row,counter_col))
+            drawBoard()
+            Current_Player = 'X'  ##收到对面信息后回到主场
+            previewImg = previewCrossImg
+            pygame.display.update()
+
+        if re_flash:
+            Common_Reset()
+        if re_reg == 1:
+            print("接收reg")
+            lenth = len(over_pos)
+            if lenth > 0:
+                x = over_pos[lenth - 1][0]
+                y = over_pos[lenth - 1][1]
+                del over_pos[lenth - 1]
+                if lenth == 1:
+                    resetGame()
+                elif board[x][y] == "X":
+                    print("regret x")
+                    Current_Player = "O"
+                    previewImg = previewCircleImg
+                    board[x][y] = " "
+                    drawBoard()
+                elif board[x][y] == "O":
+                    print("regret o")
+                    Current_Player = "X"
+                    previewImg = previewCrossImg
+                    board[x][y] = " "
+                    drawBoard()
+                pygame.display.update()
+            # time.sleep(0.5)
+
+
+
+def TCP_Server():
+    global send_row, send_col, Send_Flag, row, col, Receive_Flag, i, current_player, previewImg, message,sure_flag,flash_flag,SOR
+    global pi_send_flag, pi_received_flag, pi_row, pi_col, pr_flash
+    pi_sr = re.compile(r'SenOrRec(\d)')
+    while True:
+        if SOR == 0:
+            time.sleep(0.3)
+            print("Send_message", message)
+            dataSocket.send(message.encode())
+            sure_flag = 0
+            flash_flag = 0
+            regret_flag = 0
+            message = "sure_f" + str(sure_flag) + "row" + str(send_row) + " col" + str(send_col) + "flash" + str(
+                flash_flag) + "reg" + str(regret_flag)
+            print("waiting for receiving...........")
+            # time.sleep(0.1)
+            SOR = 1
+        if SOR == 1:
+            recved = dataSocket.recv(BUFLEN)
+            rec = recved.decode()
+            if not recved:
+                break
+            if rec:
+                # re_SOR = pi_sr.search(rec)
+                # SOR = re_SOR.group(1)
+                handle(rec)
+                print("received", rec)
+                dataSocket.send(message.encode())
+                SOR = 0
+
+
+server_thread = threading.Thread(target = TCP_Server )
+server_thread.start()
+menu()
+dataSocket.close()
+listenSocket.close()
